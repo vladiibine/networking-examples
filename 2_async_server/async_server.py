@@ -5,6 +5,8 @@ Doing the same thing as in 1_simple_server, but asynchronously
 Inspired by Raymond Hettinger's example:
  https://pybay.com/site_media/slides/raymond2017-keynote/async_examples.html
 
+TODO - further reading: https://docs.python.org/3.8/howto/sockets.html#socket-howto
+
 Usage:
 $ python async_server.py
 
@@ -142,35 +144,55 @@ def readline(s: socket.socket):
 
 @business_logic
 async def nonblocking_caser(s: socket.socket):
-    upper, title = 'upper', 'title'
-    mode = upper
+    cmd_quit = 'quit'
+    cmd_upper = 'upper'
+    cmd_title = 'title'
+    cmd_lower = 'lower'
+    cmd_help = 'help'
+
+    mode = cmd_upper
     print(f"Received connection from {sessions[s].address}")
 
     try:
-        s.sendall(b"<welcome! Starting in upper case mode>\r\n")
+        s.sendall(b"<Welcome to the echo-server! Starting in upper case mode>\r\n")
+        s.sendall(b"<To see the available commands, type \"help\" and press return>\r\n")
         while True:
             line = await readline(s)
 
-            if line == 'quit':
+            if line == cmd_quit:
                 s.sendall(b"quit\r\n")
                 return
 
-            if mode is upper and line == 'title':
+            if line == cmd_help:
+                s.sendall(b"Available commands: \r\n"
+                          b"help - shows the available commands\r\n"
+                          b"quit - quits the session\r\n"
+                          b"upper - sets the echoing mode to UPPER case\r\n"
+                          b"lower - sets the echoing mode to lower case\r\n"
+                          b"title - sets the echoing mode to Title case\r\n"
+                          )
+                continue
+
+            if mode is not cmd_title and line == cmd_title:
                 s.sendall(b"<switching to Title case mode>\r\n")
-                mode = title
+                mode = cmd_title
                 continue
 
-            if mode is title and line == 'upper':
-                # ??? Why `line =` here? in the other places we didn't get the line
-                # it's a mistype
+            if mode is not cmd_upper and line == cmd_upper:
                 s.sendall(b"<switching to UPPER case mode>\r\n")
-                mode = upper
+                mode = cmd_upper
                 continue
 
-            if mode is upper:
+            if mode is not cmd_lower and line == cmd_lower:
+                s.sendall(b"<Switching to lower case mode>\r\n")
+                mode = cmd_lower
+
+            if mode is cmd_upper:
                 s.sendall(b"UPPER-cased: %a \r\n" % line.upper())
-            else:
-                s.sendall(b"Title-cased: %a\r\n" % line.title())
+            elif mode is cmd_title:
+                s.sendall(b"Title-cased: %a \r\n" % line.title())
+            elif mode is cmd_lower:
+                s.sendall(b"lower-cased: %a \r\n" % line.title())
 
             print(f"From {sessions[s].address} got {line}")
     finally:
@@ -206,9 +228,12 @@ def start_reactor(host, port):
         server_socket.bind((host, port))
         print(f"vlad: socket is bound")
         server_socket.listen()
-        server_socket.setblocking(False)
-        sessions[server_socket] = None
         print(f"vlad: listening")
+        server_socket.setblocking(False)
+        # This should allow me to restart the server right after I shut it down
+        # ...but it doesn't work
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sessions[server_socket] = None
         while True:
             ready_to_read, _, _ = select.select(sessions, [], [], 0.1)
             for ready_socket in ready_to_read:
@@ -239,7 +264,7 @@ def start_reactor(host, port):
                     event.task()
     finally:
         # TODO - server shutdown first?
-        server_socket.shutdown(socket.SHUT_RD)
+        server_socket.shutdown(socket.SHUT_RDWR)
         server_socket.close()
 
 
