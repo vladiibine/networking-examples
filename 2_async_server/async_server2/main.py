@@ -40,7 +40,7 @@ async def nonblocking_caser(s: socket.socket):
         s.sendall(b"<Welcome to the echo-server! Starting in upper case mode>\r\n")
         s.sendall(b"<To see the available commands, type \"help\" and press return>\r\n\r\n")
         while True:
-            line = await readline()
+            line = (await readline()).strip()
 
             if line == cmd_quit:
                 s.sendall(b"bye!\r\n")

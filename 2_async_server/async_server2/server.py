@@ -46,7 +46,9 @@ def try_closing_the_server_socket(server_socket: socket.socket):
             print(f"vlad: shutting down the server socket failed (read/write)")
         server_socket.close()
 
-
+# TODO - this doesn't do any bloody reading of any bloody line!
+#  the "readline" logic is hardcoded in the server. This just
+#  progresses the coroutine
 @types.coroutine
 def readline():  # TODO - how does this work if we're not using the socket?
     """A non-blocking readline to use with two-way generators"""
@@ -54,16 +56,21 @@ def readline():  # TODO - how does this work if we're not using the socket?
     # TODO - preferably replace generators with async functions
     # TODO - omg, this readling thing is poking quite alot into the insides of Reactor
     #   I wonder if this is the only way to do things
-    def inner(s_, line_):
-        g = Reactor.get_instance().get_generator(s_)
-        try:
-            Reactor.get_instance().add_callback(s_, g.send(line_))
-        except StopIteration:
-            # TODO - readline knows about disconnecting? why would that be?
-            #  ...well, for sure readline knows that we can't read anymore
-            #  ...but should it run the disconnect itself?
-            #  ...we'll see. I'll distill, make this supple, and get to a deep design
-            Reactor.get_instance().disconnect(s_)
+    def inner(session: Session, socket_: socket.socket):
+        # socket_.makefile().readline() works just as well!
+        line_ = session.file.readline()
+        if line_:
+            g = Reactor.get_instance().get_generator(socket_)
+            try:
+                Reactor.get_instance().add_callback(socket_, g.send(line_))
+            except StopIteration:
+                # TODO - readline knows about disconnecting? why would that be?
+                #  ...well, for sure readline knows that we can't read anymore
+                #  ...but should it run the disconnect itself?
+                #  ...we'll see. I'll distill, make this supple, and get to a deep design
+                Reactor.get_instance().disconnect(socket_)
+        else:
+            Reactor.get_instance().disconnect(socket_)
 
     line = yield inner
     return line
@@ -104,20 +111,7 @@ class Reactor:
                         self.connect(ready_socket, address, self.server_callbacks[original_socket])
                         continue
 
-                    # todo - readline? why not read until done? This might block and also
-                    #  reading a line has no defined semantics
-                    # Got it! it's readline because we must read until "something"
-                    # so either read until a certain character is reached, or read a
-                    # certain number of bytes. Reading a certain number of bytes is the
-                    # tricky part. How do we know how many bytes? :P RFC2616
-                    # (the http 1.1 protocol paper) specifies lots of rules, but implementing
-                    # them is out of scope
-                    line = self.sessions[ready_socket].file.readline()
-                    if line:
-                        # todo - do we need rstrip?
-                        self.callbacks[ready_socket](ready_socket, line.rstrip())
-                    else:
-                        self.disconnect(ready_socket)
+                    self.callbacks[ready_socket](self.sessions[ready_socket], ready_socket)
 
                     # run scheduled events at the scheduled time
                     while self.events and self.events[0].event_time <= time.monotonic():
