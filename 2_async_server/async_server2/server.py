@@ -21,6 +21,8 @@ class ScheduledEvent(NamedTuple):
 
 
 def try_closing_the_server_socket(server_socket: socket.socket):
+    # TODO - this entire function is BS. To be able to shut down a socket,
+    #  as far as I know now, one needs to set certain options on it
     # this part seems to fail sometimes, I have no idea what's going on here really
     # I'm basically trying to close the listening socket, so I can kill the server
     # and restart it again quickly after killing it.
@@ -178,10 +180,16 @@ class Reactor:
 def create_async_server_socket(host, port):
     # socket.socket, bind, accept, listen, send, (recv to do), close, shutdown
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # TODO - in a real world scenario, you wouldn't want this line in production
+    #  however, since this entire project is just a learning exercies, it's fine
+    #  Explanation - this has the effect of allowing a restart of the server
+    #  right after it was closed. Otherwise, we'd have to wait for 1 minute
+    #  before being allowed to open a new connection on the same port
+    #  https://stackoverflow.com/questions/4465959/python-errno-98-address-already-in-use
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((host, port))
     server_socket.listen()
     server_socket.setblocking(False)
     # This should allow me to restart the server right after I shut it down
     # ...but it doesn't work
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     return server_socket
