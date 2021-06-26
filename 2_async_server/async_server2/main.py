@@ -14,10 +14,10 @@ class Command:
         return self.func(self.name.encode())
 
     def switching_to_msg(self):
-        return b"<Switching to %a cased mode>\r\n" % self.case_self()
+        return b"<Switching to %s cased mode>\r\n\r\n" % self.case_self()
 
     def echo_msg(self, msg: bytes):
-        return b"%a-cased: %a\r\n" % (self.case_self(), msg)
+        return b"%s-cased: %s\r\n\r\n" % (self.case_self(), self.func(msg))
 
 
 async def nonblocking_caser(s: socket.socket):
@@ -38,9 +38,9 @@ async def nonblocking_caser(s: socket.socket):
 
     try:
         s.sendall(b"<Welcome to the echo-server! Starting in upper case mode>\r\n")
-        s.sendall(b"<To see the available commands, type \"help\" and press return>\r\n")
+        s.sendall(b"<To see the available commands, type \"help\" and press return>\r\n\r\n")
         while True:
-            line = await readline(s)
+            line = await readline()
 
             if line == cmd_quit:
                 s.sendall(b"bye!\r\n")
@@ -53,6 +53,7 @@ async def nonblocking_caser(s: socket.socket):
                           b"upper - sets the echoing mode to UPPER case\r\n"
                           b"lower - sets the echoing mode to lower case\r\n"
                           b"title - sets the echoing mode to Title case\r\n"
+                          b"\r\n"
                           )
             elif line in possible_modes:
                 for mode_candidate in possible_modes:

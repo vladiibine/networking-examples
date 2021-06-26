@@ -48,7 +48,7 @@ def try_closing_the_server_socket(server_socket: socket.socket):
 
 
 @types.coroutine
-def readline(s: socket.socket):  # TODO - how does this work if we're not using the socket?
+def readline():  # TODO - how does this work if we're not using the socket?
     """A non-blocking readline to use with two-way generators"""
 
     # TODO - preferably replace generators with async functions
