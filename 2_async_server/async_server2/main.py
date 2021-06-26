@@ -1,5 +1,23 @@
+import dataclasses
 import socket
+from typing import Callable
+
 from server import Reactor, create_async_server_socket, readline
+
+
+@dataclasses.dataclass
+class Command:
+    name: str
+    func: Callable[[bytes], bytes]
+
+    def case_self(self):
+        return self.func(self.name.encode())
+
+    def switching_to_msg(self):
+        return b"<Switching to %a cased mode>\r\n" % self.case_self()
+
+    def echo_msg(self, msg: bytes):
+        return b"%a-cased: %a\r\n" % (self.case_self(), msg)
 
 
 async def nonblocking_caser(s: socket.socket):
@@ -8,6 +26,12 @@ async def nonblocking_caser(s: socket.socket):
     cmd_title = 'title'
     cmd_lower = 'lower'
     cmd_help = 'help'
+
+    possible_modes = {
+        cmd_upper: Command(cmd_upper, bytes.upper,),
+        cmd_title: Command(cmd_title, bytes.title,),
+        cmd_lower: Command(cmd_lower, bytes.lower,),
+    }
 
     mode = cmd_upper
     print(f"Received connection from {Reactor.get_instance().get_address_of(s)}")
@@ -30,29 +54,13 @@ async def nonblocking_caser(s: socket.socket):
                           b"lower - sets the echoing mode to lower case\r\n"
                           b"title - sets the echoing mode to Title case\r\n"
                           )
-                continue
-
-            if mode is not cmd_title and line == cmd_title:
-                s.sendall(b"<switching to Title case mode>\r\n")
-                mode = cmd_title
-                continue
-
-            if mode is not cmd_upper and line == cmd_upper:
-                s.sendall(b"<switching to UPPER case mode>\r\n")
-                mode = cmd_upper
-                continue
-
-            if mode is not cmd_lower and line == cmd_lower:
-                s.sendall(b"<Switching to lower case mode>\r\n")
-                mode = cmd_lower
-                continue
-
-            if mode is cmd_upper:
-                s.sendall(b"UPPER-cased: %a \r\n" % line.upper())
-            elif mode is cmd_title:
-                s.sendall(b"Title-cased: %a \r\n" % line.title())
-            elif mode is cmd_lower:
-                s.sendall(b"lower-cased: %a \r\n" % line.lower())
+            elif line in possible_modes:
+                for mode_candidate in possible_modes:
+                    if mode is not mode_candidate and line == mode_candidate:
+                        s.sendall(possible_modes[mode].switching_to_msg())
+                        mode = mode_candidate
+            else:
+                s.sendall(possible_modes[mode].echo_msg(line.encode('utf-8')))
 
             print(f"From {Reactor.get_instance().get_address_of(s)} got {line}")
     finally:
