@@ -46,34 +46,47 @@ def try_closing_the_server_socket(server_socket: socket.socket):
             print(f"vlad: shutting down the server socket failed (read/write)")
         server_socket.close()
 
-# TODO - this doesn't do any bloody reading of any bloody line!
-#  the "readline" logic is hardcoded in the server. This just
-#  progresses the coroutine
+
 @types.coroutine
-def readline():  # TODO - how does this work if we're not using the socket?
+def readline():
     """A non-blocking readline to use with two-way generators"""
 
     # TODO - preferably replace generators with async functions
-    # TODO - omg, this readling thing is poking quite alot into the insides of Reactor
-    #   I wonder if this is the only way to do things
     def inner(session: Session, socket_: socket.socket):
         # socket_.makefile().readline() works just as well!
         line_ = session.file.readline()
-        if line_:
-            g = Reactor.get_instance().get_generator(socket_)
-            try:
-                Reactor.get_instance().add_callback(socket_, g.send(line_))
-            except StopIteration:
-                # TODO - readline knows about disconnecting? why would that be?
-                #  ...well, for sure readline knows that we can't read anymore
-                #  ...but should it run the disconnect itself?
-                #  ...we'll see. I'll distill, make this supple, and get to a deep design
-                Reactor.get_instance().disconnect(socket_)
-        else:
-            Reactor.get_instance().disconnect(socket_)
+
+        Reactor.get_instance().make_progress(socket_, line_)
 
     line = yield inner
     return line
+
+
+# I don't know how to create an `async def readline()` at this point.
+# async def readline():
+#     def inner(session: Session, socket_: socket.socket):
+#         line = session.file.readline()
+#         Reactor.get_instance().make_progress(socket_, line)
+#
+#     line = inner
+#     return line
+
+
+
+# todo - maybe the yield-based coroutine is necessary?
+#  I think that `await` already does some wrapping/unwrapping
+#  for us maybe?
+# async def readline2():
+#     def readline_inner(session: Session, socket_: socket.socket):
+#         line_ = session.file.readline()
+#         if line_:
+#             g = Reactor.get_instance().get_generator(socket_)
+#             try:
+#                 Reactor.get_instance().add_callback(socket_, await g(line_))
+#             except StopIteration:
+#                 Reactor.get_instance().disconnect(socket_)
+#
+#     line = yield readline_inner
 
 
 class Reactor:
@@ -108,7 +121,7 @@ class Reactor:
                         assert isinstance(ready_socket, socket.socket)
                         original_socket = ready_socket
                         ready_socket, address = ready_socket.accept()
-                        self.connect(ready_socket, address, self.server_callbacks[original_socket])
+                        self._connect(ready_socket, address, self.server_callbacks[original_socket])
                         continue
 
                     self.callbacks[ready_socket](self.sessions[ready_socket], ready_socket)
@@ -122,14 +135,18 @@ class Reactor:
             for srv_socket in self.server_callbacks:
                 try_closing_the_server_socket(srv_socket)
 
-    def connect(self, s: socket.socket, address, async_callback):
+    def _connect(self, s: socket.socket, address, async_callback):
         self.sessions[s] = Session(address, s.makefile(), async_callback)
 
         g = async_callback(s)
         self.generators[s] = g
+        # This line looks really weird! Without it, nothing works, but it doesn't look natural!
+        # so this actually runs the callbacks, but it's weird as hell!
+        # why (None) ? I guess that's a detail of how stuff works.
+        # because: "TypeError: can't send non-None value to a just-started coroutine"
         self.callbacks[s] = g.send(None)
 
-    def disconnect(self, s: socket.socket):
+    def _disconnect(self, s: socket.socket):
         # TODO - when do we close server sockets? :/
         #  ...after a certain ammount of time of them not being used
         #  is a reasonable approach
@@ -153,9 +170,6 @@ class Reactor:
         """
         return self.sessions[s].address
 
-    def add_callback(self, sock: socket.socket, callback: Callable):
-        self.callbacks[sock] = callback
-
     def add_server_socket_and_callback(self, s: socket.socket, callback):
         """
         :param s: This is a server socket, meaning we'll not use this to send/recv, but
@@ -167,8 +181,14 @@ class Reactor:
         """
         self.server_callbacks[s] = callback
 
-    def get_generator(self, s_):
-        return self.generators[s_]
+    def make_progress(self, socket_, result):
+        """This appears to need to be a public method"""
+        g = self.generators[socket_]
+        try:
+            next_generator = g.send(result)
+            self.callbacks[socket_] = next_generator
+        except StopIteration:
+            self._disconnect(socket_)
 
 
 def create_async_server_socket(host, port):

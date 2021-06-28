@@ -60,7 +60,7 @@ async def nonblocking_caser(s: socket.socket):
                     if mode is not mode_candidate and line == mode_candidate:
                         s.sendall(possible_modes[mode].switching_to_msg())
                         mode = mode_candidate
-            else:
+            elif line:
                 s.sendall(possible_modes[mode].echo_msg(line.encode('utf-8')))
 
             print(f"From {Reactor.get_instance().get_address_of(s)} got {line}")
