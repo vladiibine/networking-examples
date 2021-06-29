@@ -5,7 +5,7 @@ Same thing as async_server.py, but separating business logic from framework impl
 (which would lead in the end to a simplified re-implementation of asyncio)
 
 Usage:
-$ python async_server2.main
+$ python -m async_server2.main
 
 ..then in another shell
 $ telnet localhost 1848

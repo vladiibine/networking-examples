@@ -1,8 +1,12 @@
+"""
+Check __init__.py for documentation/usage
+"""
 import dataclasses
 import socket
 from typing import Callable
 
-from server import Reactor, create_async_server_socket, readline
+from .server import Reactor, create_async_server_socket
+from .io import readline
 
 
 @dataclasses.dataclass

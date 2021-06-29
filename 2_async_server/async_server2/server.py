@@ -60,19 +60,6 @@ def try_closing_the_server_socket(server_socket: socket.socket):
         server_socket.close()
 
 
-@types.coroutine
-def readline():
-    """A non-blocking readline to use with two-way generators"""
-
-    # TODO - preferably replace generators with async functions
-    def inner(session: Session):
-        # socket_.makefile().readline() works just as well!
-        line_ = session.file.readline()
-
-        Reactor.get_instance().make_progress(session, line_)
-
-    line = yield inner
-    return line
 
 
 # I don't know how to create an `async def readline()` at this point.
