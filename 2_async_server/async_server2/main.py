@@ -58,7 +58,7 @@ async def nonblocking_caser(s: socket.socket):
             elif line in possible_modes:
                 for mode_candidate in possible_modes:
                     if mode is not mode_candidate and line == mode_candidate:
-                        s.sendall(possible_modes[mode].switching_to_msg())
+                        s.sendall(possible_modes[line].switching_to_msg())
                         mode = mode_candidate
             elif line:
                 s.sendall(possible_modes[mode].echo_msg(line.encode('utf-8')))
@@ -71,7 +71,7 @@ async def nonblocking_caser(s: socket.socket):
 if __name__ == '__main__':
     reactor = Reactor.get_instance()
 
-    server_socket = create_async_server_socket('localhost', 1848)
+    server_socket = create_async_server_socket('localhost', 1848, reuse=True)
     reactor.add_server_socket_and_callback(server_socket, nonblocking_caser)
 
     reactor.start_reactor()

@@ -12,7 +12,6 @@ T = TypeVar('T')
 class Session(NamedTuple):
     address: str
     file: TextIO
-    callback: Callable
 
 
 class ScheduledEvent(NamedTuple):
@@ -21,29 +20,12 @@ class ScheduledEvent(NamedTuple):
 
 
 def try_closing_the_server_socket(server_socket: socket.socket):
-    # TODO - this entire function is BS. To be able to shut down a socket,
-    #  as far as I know now, one needs to set certain options on it
-    # this part seems to fail sometimes, I have no idea what's going on here really
-    # I'm basically trying to close the listening socket, so I can kill the server
-    # and restart it again quickly after killing it.
     if server_socket:
-        try:
-            server_socket.shutdown(socket.SHUT_RD)
-            print(f"vlad: succeeded shutting down the server (read)")
-        except OSError:
-            print(f"vlad: shutting down the server socket failed (read)")
-
-        try:
-            server_socket.shutdown(socket.SHUT_WR)
-            print(f"vlad: succeeded shutting down the server (write)")
-        except OSError:
-            print(f"vlad: shutting down the server socket failed (write)")
-
-        try:
-            server_socket.shutdown(socket.SHUT_RDWR)
-            print(f"vlad: succeeded shutting down the server (read/write)")
-        except OSError:
-            print(f"vlad: shutting down the server socket failed (read/write)")
+        for mode in (socket.SHUT_RD, socket.SHUT_WR, socket.SHUT_RDWR):
+            try:
+                server_socket.shutdown(socket.SHUT_RD)
+            except OSError:
+                print(f"vlad: failed to shut down the server in mode {mode}")
         server_socket.close()
 
 
@@ -70,23 +52,6 @@ def readline():
 #
 #     line = inner
 #     return line
-
-
-
-# todo - maybe the yield-based coroutine is necessary?
-#  I think that `await` already does some wrapping/unwrapping
-#  for us maybe?
-# async def readline2():
-#     def readline_inner(session: Session, socket_: socket.socket):
-#         line_ = session.file.readline()
-#         if line_:
-#             g = Reactor.get_instance().get_generator(socket_)
-#             try:
-#                 Reactor.get_instance().add_callback(socket_, await g(line_))
-#             except StopIteration:
-#                 Reactor.get_instance().disconnect(socket_)
-#
-#     line = yield readline_inner
 
 
 class Reactor:
@@ -131,12 +96,11 @@ class Reactor:
                         event = heappop(self.events)
                         event.task()
         finally:
-            # TODO - server shutdown first?
             for srv_socket in self.server_callbacks:
                 try_closing_the_server_socket(srv_socket)
 
     def _connect(self, s: socket.socket, address, async_callback):
-        self.sessions[s] = Session(address, s.makefile(), async_callback)
+        self.sessions[s] = Session(address, s.makefile())
 
         g = async_callback(s)
         self.generators[s] = g
@@ -191,19 +155,21 @@ class Reactor:
             self._disconnect(socket_)
 
 
-def create_async_server_socket(host, port):
+def create_async_server_socket(host, port, reuse: bool = False):
+    """
+    :param host:
+    :param port:
+    :param reuse: If true, allows shutting down the server and starting it up
+        right away. Otherwise, we have to wait 1min before starting it up again
+        https://stackoverflow.com/questions/4465959/python-errno-98-address-already-in-use
+        In production, you'd want this set to `false`.
+    :return:
+    """
     # socket.socket, bind, accept, listen, send, (recv to do), close, shutdown
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # TODO - in a real world scenario, you wouldn't want this line in production
-    #  however, since this entire project is just a learning exercies, it's fine
-    #  Explanation - this has the effect of allowing a restart of the server
-    #  right after it was closed. Otherwise, we'd have to wait for 1 minute
-    #  before being allowed to open a new connection on the same port
-    #  https://stackoverflow.com/questions/4465959/python-errno-98-address-already-in-use
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if reuse:
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((host, port))
     server_socket.listen()
     server_socket.setblocking(False)
-    # This should allow me to restart the server right after I shut it down
-    # ...but it doesn't work
     return server_socket
