@@ -19,6 +19,12 @@ class Session:
     # Doesn't change, it just generates functions which we call with `Session` instances
     generator: Coroutine
 
+    # This keeps changing. It's always the next function returned by the generator
+    # (until the generator finishes, and doesn't return anything anymore)
+    # Optional, because in order to obtain this, the session already has to exist
+    # (well not technically true, but it simplifies things)
+    next_callback: Optional[Callable[["Session"], Any]]
+
 
 class ScheduledEvent(NamedTuple):
     event_time: float
@@ -65,12 +71,7 @@ class Reactor:
 
     def __init__(self):
         self.sessions = {}  # type: dict[socket.socket, Optional[Session]]
-        # todo - add typing for the callable
-        self.callbacks = {}  # type: dict[socket.socket, Callable[[Session], Any]]
         self.server_callbacks = {}  # type: dict[socket.socket, Callable]
-
-        # TODO - add typing for coroutine
-        # self.generators = {}  # type: dict[socket.socket, Coroutine]
 
         self.events = []  # type: list[ScheduledEvent]
 
@@ -95,7 +96,8 @@ class Reactor:
                         self._connect(ready_socket, address, self.server_callbacks[original_socket])
                         continue
 
-                    self.callbacks[ready_socket](self.sessions[ready_socket])
+                    session = self.sessions[ready_socket]
+                    session.next_callback(session)
 
                     # run scheduled events at the scheduled time
                     while self.events and self.events[0].event_time <= time.monotonic():
@@ -106,13 +108,14 @@ class Reactor:
                 try_closing_the_server_socket(srv_socket)
 
     def _connect(self, s: socket.socket, address, async_callback):
-        self.sessions[s] = Session(address, s.makefile(), s, async_callback(s))
+        generator = async_callback(s)
+        self.sessions[s] = Session(address, s.makefile(), s, generator, None)
 
         # This line looks really weird! Without it, nothing works, but it doesn't look natural!
         # so this actually runs the callbacks, but it's weird as hell!
         # why (None) ? I guess that's a detail of how stuff works.
         # because: "TypeError: can't send non-None value to a just-started coroutine"
-        self.callbacks[s] = self.sessions[s].generator.send(None)
+        self.sessions[s].next_callback = generator.send(None)
 
     def _disconnect(self, s: socket.socket):
         # TODO - when do we close server sockets? :/
@@ -122,7 +125,6 @@ class Reactor:
         self.sessions[s].file.close()
         s.close()
         del self.sessions[s]
-        del self.callbacks[s]
 
     @classmethod
     def get_instance(cls):
@@ -151,8 +153,8 @@ class Reactor:
     def make_progress(self, session: Session, result):
         """This appears to need to be a public method"""
         try:
-            next_generator = session.generator.send(result)  # calling nonblocking_caser with the line
-            self.callbacks[session.socket] = next_generator
+            next_callback = session.generator.send(result)  # calling nonblocking_caser with the line
+            session.next_callback = next_callback
         except StopIteration:
             self._disconnect(session.socket)
 
