@@ -31,6 +31,7 @@ class Session:
     next_callback: Optional[Callable[["Session"], Any]]
 
     def make_progress(self, result: Any):
+        """DO NOT CALL THIS DIRECTLY! It's meant do be called from Reactor.make_progress"""
         try:
             # For example, continuing nonblocking_caser with the awaited result (the line)
             self.next_callback = self.generator.send(result)
