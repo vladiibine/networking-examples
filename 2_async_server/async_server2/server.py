@@ -41,7 +41,7 @@ def readline():
         # socket_.makefile().readline() works just as well!
         line_ = session.file.readline()
 
-        Reactor.get_instance().make_progress(session.socket, line_)
+        Reactor.get_instance().make_progress(session, line_)
 
     line = yield inner
     return line
@@ -147,14 +147,14 @@ class Reactor:
         """
         self.server_callbacks[s] = callback
 
-    def make_progress(self, socket_, result):
+    def make_progress(self, session: Session, result):
         """This appears to need to be a public method"""
-        g = self.generators[socket_]
+        g = self.generators[session.socket]
         try:
             next_generator = g.send(result)
-            self.callbacks[socket_] = next_generator
+            self.callbacks[session.socket] = next_generator
         except StopIteration:
-            self._disconnect(socket_)
+            self._disconnect(session.socket)
 
 
 def create_async_server_socket(host, port, reuse: bool = False):
