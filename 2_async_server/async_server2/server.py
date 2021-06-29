@@ -1,3 +1,4 @@
+import dataclasses
 import select
 import socket
 import time
@@ -5,13 +6,15 @@ import types
 from heapq import heappop
 from typing import NamedTuple, TextIO, Callable, Any, TypeVar, Coroutine, Optional
 
-
 T = TypeVar('T')
 
 
-class Session(NamedTuple):
+@dataclasses.dataclass
+class Session:
     address: str
     file: TextIO
+    initial_callback: Callable[[Any, str], Any]  # todo: add more typing
+    started_callback: Optional[Coroutine]  # todo: add typing
 
 
 class ScheduledEvent(NamedTuple):
@@ -59,12 +62,9 @@ class Reactor:
 
     def __init__(self):
         self.sessions = {}  # type: dict[socket.socket, Optional[Session]]
-        # todo - add typing for the callable
-        self.callbacks = {}  # type: dict[socket.socket, Callable[[Any, str], Any]]
-        self.server_callbacks = {}  # type: dict[socket.socket, Callable]
 
-        # TODO - add typing for coroutine
-        self.generators = {}  # type: dict[socket.socket, Coroutine]
+        # todo - add typing for the callable
+        self.server_callbacks = {}  # type: dict[socket.socket, Callable]
 
         self.events = []  # type: list[ScheduledEvent]
 
@@ -89,7 +89,8 @@ class Reactor:
                         self._connect(ready_socket, address, self.server_callbacks[original_socket])
                         continue
 
-                    self.callbacks[ready_socket](self.sessions[ready_socket], ready_socket)
+                    # self.sessions[ready_socket].initial_callback(self.sessions[ready_socket], ready_socket)
+                    self.sessions[ready_socket].started_callback(self.sessions[ready_socket], ready_socket)
 
                     # run scheduled events at the scheduled time
                     while self.events and self.events[0].event_time <= time.monotonic():
@@ -100,26 +101,31 @@ class Reactor:
                 try_closing_the_server_socket(srv_socket)
 
     def _connect(self, s: socket.socket, address, async_callback):
-        self.sessions[s] = Session(address, s.makefile())
-
-        g = async_callback(s)
-        self.generators[s] = g
         # This line looks really weird! Without it, nothing works, but it doesn't look natural!
         # so this actually runs the callbacks, but it's weird as hell!
         # why (None) ? I guess that's a detail of how stuff works.
         # because: "TypeError: can't send non-None value to a just-started coroutine"
-        self.callbacks[s] = g.send(None)
+        try:
+            import pydevd_pycharm
+            pydevd_pycharm.settrace('localhost', port=5678, stdoutToServer=True, stderrToServer=True)
+        except ImportError:
+            print("Either you reployed debugger code to production OR you forgot to install the debugging library:")
+            print("pip install 'pydevd-pycharm==211.7442.45'")
+
+        g = async_callback(s)
+        sess = Session(address, s.makefile(), g, None)
+        self.sessions[s] = sess
+
+        sess.initial_callbacks = g.send(None)
 
     def _disconnect(self, s: socket.socket):
         # TODO - when do we close server sockets? :/
-        #  ...after a certain ammount of time of them not being used
+        #  ...after a certain amount of time of them not being used
         #  is a reasonable approach
-        g = self.generators.pop(s)
-        g.close()
         self.sessions[s].file.close()
+        self.sessions[s].started_callback.close()
         s.close()
         del self.sessions[s]
-        del self.callbacks[s]
 
     @classmethod
     def get_instance(cls):
@@ -147,10 +153,10 @@ class Reactor:
 
     def make_progress(self, socket_, result):
         """This appears to need to be a public method"""
-        g = self.generators[socket_]
+        g = self.sessions[socket_].started_callback
         try:
             next_generator = g.send(result)
-            self.callbacks[socket_] = next_generator
+            self.sessions[socket_].started_callback = next_generator
         except StopIteration:
             self._disconnect(socket_)
 
