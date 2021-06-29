@@ -16,6 +16,9 @@ class Session:
     file: TextIO
     socket: socket.socket
 
+    # Doesn't change, it just generates functions which we call with `Session` instances
+    generator: Coroutine
+
 
 class ScheduledEvent(NamedTuple):
     event_time: float
@@ -67,7 +70,7 @@ class Reactor:
         self.server_callbacks = {}  # type: dict[socket.socket, Callable]
 
         # TODO - add typing for coroutine
-        self.generators = {}  # type: dict[socket.socket, Coroutine]
+        # self.generators = {}  # type: dict[socket.socket, Coroutine]
 
         self.events = []  # type: list[ScheduledEvent]
 
@@ -103,21 +106,19 @@ class Reactor:
                 try_closing_the_server_socket(srv_socket)
 
     def _connect(self, s: socket.socket, address, async_callback):
-        self.sessions[s] = Session(address, s.makefile(), s)
+        self.sessions[s] = Session(address, s.makefile(), s, async_callback(s))
 
-        self.generators[s] = async_callback(s)
         # This line looks really weird! Without it, nothing works, but it doesn't look natural!
         # so this actually runs the callbacks, but it's weird as hell!
         # why (None) ? I guess that's a detail of how stuff works.
         # because: "TypeError: can't send non-None value to a just-started coroutine"
-        self.callbacks[s] = self.generators[s].send(None)
+        self.callbacks[s] = self.sessions[s].generator.send(None)
 
     def _disconnect(self, s: socket.socket):
         # TODO - when do we close server sockets? :/
         #  ...after a certain ammount of time of them not being used
         #  is a reasonable approach
-        g = self.generators.pop(s)
-        g.close()
+        self.sessions[s].generator.close()
         self.sessions[s].file.close()
         s.close()
         del self.sessions[s]
@@ -149,9 +150,8 @@ class Reactor:
 
     def make_progress(self, session: Session, result):
         """This appears to need to be a public method"""
-        g = self.generators[session.socket]
         try:
-            next_generator = g.send(result)
+            next_generator = session.generator.send(result)  # calling nonblocking_caser with the line
             self.callbacks[session.socket] = next_generator
         except StopIteration:
             self._disconnect(session.socket)
