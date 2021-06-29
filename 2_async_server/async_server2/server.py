@@ -102,13 +102,12 @@ class Reactor:
     def _connect(self, s: socket.socket, address, async_callback):
         self.sessions[s] = Session(address, s.makefile())
 
-        g = async_callback(s)
-        self.generators[s] = g
+        self.generators[s] = async_callback(s)
         # This line looks really weird! Without it, nothing works, but it doesn't look natural!
         # so this actually runs the callbacks, but it's weird as hell!
         # why (None) ? I guess that's a detail of how stuff works.
         # because: "TypeError: can't send non-None value to a just-started coroutine"
-        self.callbacks[s] = g.send(None)
+        self.callbacks[s] = self.generators[s].send(None)
 
     def _disconnect(self, s: socket.socket):
         # TODO - when do we close server sockets? :/
