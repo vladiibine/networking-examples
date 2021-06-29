@@ -2,12 +2,17 @@ import dataclasses
 import select
 import socket
 import time
+import traceback
 import types
 from heapq import heappop
 from typing import NamedTuple, TextIO, Callable, Any, TypeVar, Coroutine, Optional
 
 
 T = TypeVar('T')
+
+
+class SessionFinished(Exception):
+    pass
 
 
 @dataclasses.dataclass
@@ -24,6 +29,19 @@ class Session:
     # Optional, because in order to obtain this, the session already has to exist
     # (well not technically true, but it simplifies things)
     next_callback: Optional[Callable[["Session"], Any]]
+
+    def make_progress(self, result: Any):
+        try:
+            # For example, continuing nonblocking_caser with the awaited result (the line)
+            self.next_callback = self.generator.send(result)
+
+        except StopIteration as err:
+            raise SessionFinished from err
+
+        except Exception as err:
+            print(f"An unexpected exception has occurred: {type(err)}: {err}")
+            traceback.print_exc()
+            raise SessionFinished from err
 
 
 class ScheduledEvent(NamedTuple):
@@ -119,7 +137,7 @@ class Reactor:
 
     def _disconnect(self, s: socket.socket):
         # TODO - when do we close server sockets? :/
-        #  ...after a certain ammount of time of them not being used
+        #  ...after a certain amount of time of them not being used
         #  is a reasonable approach
         self.sessions[s].generator.close()
         self.sessions[s].file.close()
@@ -153,9 +171,8 @@ class Reactor:
     def make_progress(self, session: Session, result):
         """This appears to need to be a public method"""
         try:
-            next_callback = session.generator.send(result)  # calling nonblocking_caser with the line
-            session.next_callback = next_callback
-        except StopIteration:
+            session.make_progress(result)
+        except SessionFinished:
             self._disconnect(session.socket)
 
 
