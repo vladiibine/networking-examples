@@ -1,3 +1,4 @@
+import dataclasses
 import select
 import socket
 import time
@@ -9,9 +10,11 @@ from typing import NamedTuple, TextIO, Callable, Any, TypeVar, Coroutine, Option
 T = TypeVar('T')
 
 
-class Session(NamedTuple):
+@dataclasses.dataclass
+class Session:
     address: str
     file: TextIO
+    socket: socket.socket
 
 
 class ScheduledEvent(NamedTuple):
@@ -34,11 +37,11 @@ def readline():
     """A non-blocking readline to use with two-way generators"""
 
     # TODO - preferably replace generators with async functions
-    def inner(session: Session, socket_: socket.socket):
+    def inner(session: Session):
         # socket_.makefile().readline() works just as well!
         line_ = session.file.readline()
 
-        Reactor.get_instance().make_progress(socket_, line_)
+        Reactor.get_instance().make_progress(session.socket, line_)
 
     line = yield inner
     return line
@@ -60,7 +63,7 @@ class Reactor:
     def __init__(self):
         self.sessions = {}  # type: dict[socket.socket, Optional[Session]]
         # todo - add typing for the callable
-        self.callbacks = {}  # type: dict[socket.socket, Callable[[Any, str], Any]]
+        self.callbacks = {}  # type: dict[socket.socket, Callable[[Session], Any]]
         self.server_callbacks = {}  # type: dict[socket.socket, Callable]
 
         # TODO - add typing for coroutine
@@ -89,7 +92,7 @@ class Reactor:
                         self._connect(ready_socket, address, self.server_callbacks[original_socket])
                         continue
 
-                    self.callbacks[ready_socket](self.sessions[ready_socket], ready_socket)
+                    self.callbacks[ready_socket](self.sessions[ready_socket])
 
                     # run scheduled events at the scheduled time
                     while self.events and self.events[0].event_time <= time.monotonic():
@@ -100,7 +103,7 @@ class Reactor:
                 try_closing_the_server_socket(srv_socket)
 
     def _connect(self, s: socket.socket, address, async_callback):
-        self.sessions[s] = Session(address, s.makefile())
+        self.sessions[s] = Session(address, s.makefile(), s)
 
         self.generators[s] = async_callback(s)
         # This line looks really weird! Without it, nothing works, but it doesn't look natural!
