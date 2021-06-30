@@ -2,10 +2,9 @@
 Check __init__.py for documentation/usage
 """
 import dataclasses
-import socket
 from typing import Callable
 
-from .server import Reactor, create_async_server_socket
+from .server import Reactor, create_async_server_socket, Session
 from .io import readline
 
 
@@ -24,7 +23,7 @@ class Command:
         return b"%s-cased: %s\r\n\r\n" % (self.case_self(), self.func(msg))
 
 
-async def nonblocking_caser(s: socket.socket):
+async def nonblocking_caser(s: Session):
     cmd_quit = 'quit'
     cmd_upper = 'upper'
     cmd_title = 'title'
@@ -38,20 +37,24 @@ async def nonblocking_caser(s: socket.socket):
     }
 
     mode = cmd_upper
-    print(f"Received connection from {Reactor.get_instance().get_address_of(s)}")
+    # calling this function looks too low-level.
+    # Let's make the handler receive a Session instead
+    # print(f"Received connection from {Reactor.get_instance().get_address_of(s)}")
+    print(f"Received connection from {s.address}")
 
     try:
-        s.sendall(b"<Welcome to the echo-server! Starting in upper case mode>\r\n")
-        s.sendall(b"<To see the available commands, type \"help\" and press return>\r\n\r\n")
+        s.write(b"<Welcome to the echo-server! Starting in upper case mode>\r\n")
+        s.write(b"<To see the available commands, type \"help\" and press return>\r\n\r\n")
+
         while True:
             line = (await readline()).strip()
 
             if line == cmd_quit:
-                s.sendall(b"bye!\r\n")
+                s.write(b"bye!\r\n")
                 return
 
             if line == cmd_help:
-                s.sendall(b"Available commands: \r\n"
+                s.write(b"Available commands: \r\n"
                           b"help - shows the available commands\r\n"
                           b"quit - quits the session\r\n"
                           b"upper - sets the echoing mode to UPPER case\r\n"
@@ -62,14 +65,14 @@ async def nonblocking_caser(s: socket.socket):
             elif line in possible_modes:
                 for mode_candidate in possible_modes:
                     if mode is not mode_candidate and line == mode_candidate:
-                        s.sendall(possible_modes[line].switching_to_msg())
+                        s.write(possible_modes[line].switching_to_msg())
                         mode = mode_candidate
             elif line:
-                s.sendall(possible_modes[mode].echo_msg(line.encode('utf-8')))
+                s.write(possible_modes[mode].echo_msg(line.encode('utf-8')))
 
-            print(f"From {Reactor.get_instance().get_address_of(s)} got {line}")
+            print(f"From {s.address} got {line}")
     finally:
-        print(f"{Reactor.get_instance().get_address_of(s)} quit")
+        print(f"{s.address} quit")
 
 
 if __name__ == '__main__':

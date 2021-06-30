@@ -3,10 +3,8 @@ import select
 import socket
 import time
 import traceback
-import types
 from heapq import heappop
 from typing import NamedTuple, TextIO, Callable, Any, TypeVar, Coroutine, Optional
-
 
 T = TypeVar('T')
 
@@ -21,16 +19,22 @@ class Session:
     file: TextIO
     socket: socket.socket
 
+    # TODO - see if other mechanisms for getting/setting the generator work better
+    #  for instance, lambdas with closure, or properties which can't be set to None
     # Doesn't change, it just generates functions which we call with `Session` instances
-    generator: Coroutine
+    # Only optional for bureaucratic reasons, that I need to create objects in a certain order
+    # Otherwise, once it's set, it's never optional anymore
+    generator: Optional[Coroutine]
 
+    # TODO - same comment as above: use smth like lambdas with closures OR properties
+    #  instead of Optional[]
     # This keeps changing. It's always the next function returned by the generator
     # (until the generator finishes, and doesn't return anything anymore)
     # Optional, because in order to obtain this, the session already has to exist
     # (well not technically true, but it simplifies things)
     next_callback: Optional[Callable[["Session"], Any]]
 
-    def make_progress(self, result: Any):
+    def _make_progress(self, result: Any):
         """DO NOT CALL THIS DIRECTLY! It's meant do be called from Reactor.make_progress"""
         try:
             # For example, continuing nonblocking_caser with the awaited result (the line)
@@ -43,6 +47,9 @@ class Session:
             print(f"An unexpected exception has occurred: {type(err)}: {err}")
             traceback.print_exc()
             raise SessionFinished from err
+
+    def write(self, raw_bytes):
+        self.socket.sendall(raw_bytes)
 
 
 class ScheduledEvent(NamedTuple):
@@ -58,18 +65,6 @@ def try_closing_the_server_socket(server_socket: socket.socket):
             except OSError:
                 print(f"vlad: failed to shut down the server in mode {mode}")
         server_socket.close()
-
-
-
-
-# I don't know how to create an `async def readline()` at this point.
-# async def readline():
-#     def inner(session: Session, socket_: socket.socket):
-#         line = session.file.readline()
-#         Reactor.get_instance().make_progress(socket_, line)
-#
-#     line = inner
-#     return line
 
 
 class Reactor:
@@ -114,14 +109,16 @@ class Reactor:
                 try_closing_the_server_socket(srv_socket)
 
     def _connect(self, s: socket.socket, address, async_callback):
-        generator = async_callback(s)
-        self.sessions[s] = Session(address, s.makefile(), s, generator, None)
+        sess = Session(address, s.makefile(), s, None, None)
+        sess.generator = async_callback(sess)
+        self.sessions[s] = sess
 
         # This line looks really weird! Without it, nothing works, but it doesn't look natural!
         # so this actually runs the callbacks, but it's weird as hell!
         # why (None) ? I guess that's a detail of how stuff works.
         # because: "TypeError: can't send non-None value to a just-started coroutine"
-        self.sessions[s].next_callback = generator.send(None)
+        # sess.next_callback = sess.generator.send(None)
+        sess._make_progress(None)  # noqa
 
     def _disconnect(self, s: socket.socket):
         # TODO - when do we close server sockets? :/
@@ -159,7 +156,10 @@ class Reactor:
     def make_progress(self, session: Session, result):
         """This appears to need to be a public method"""
         try:
-            session.make_progress(result)
+            # accessing protected member! Yes!
+            # This protected member is made to be called exactly
+            # from here!
+            session._make_progress(result)  # noqa
         except SessionFinished:
             self._disconnect(session.socket)
 

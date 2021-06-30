@@ -2,6 +2,7 @@ import types
 from .server import Session, Reactor
 
 
+# TODO - why does this have to be a @types.coroutine again?
 @types.coroutine
 def readline():
     """A non-blocking readline to use with two-way generators"""
