@@ -46,12 +46,18 @@ def simple_http_get(url, port=80, headers=None) -> bytes:
     #       doesn't seem like good logic can result from here.
     # 5.2. do we do some callback things?
     # 5.3. do we return some Futures, which we resolve at this point?
+    # 5.4. Actually used a "global" variable. It's fine, there's one thread
+    #      and 1 session running at any point. Also, sessions don't really nest
+    #      so the solution should be fine. I don't see how I could make 5.3 work
+    #      but that might be just because I didn't completely understand what's
+    #      happening here, and how await/coroutines work.
 
     # I think the futures thing makes the most sense
     # result = yield get_result
     # return result
     client_socket = create_async_client_socket((url, port))
 
+    # TODO - done and result -> should get rid of them
     done = False
     result = None
     calling_session = Reactor.get_instance().get_current_session()

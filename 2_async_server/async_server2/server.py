@@ -13,6 +13,7 @@ class SessionFinished(Exception):
     pass
 
 
+# TODO - Does this make sense? Could we remove all traces of it?
 class IOIntention(enum.Enum):
     read = 'read'
     write = 'write'
