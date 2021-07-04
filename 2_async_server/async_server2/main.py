@@ -2,16 +2,17 @@
 Check __init__.py for documentation/usage
 """
 import dataclasses
-from typing import Callable
+from typing import Callable, Coroutine, Any
 
 from .server import Reactor, create_async_server_socket, Session
-from .io import readline
+from .io import readline, simple_http_get
 
 
 @dataclasses.dataclass
 class Command:
     name: str
     func: Callable[[bytes], bytes]
+    is_async: bool = False  # whether the command is to be executed asynchronously
 
     def case_self(self):
         return self.func(self.name.encode())
@@ -22,12 +23,27 @@ class Command:
     def echo_msg(self, msg: bytes):
         return b"%s-cased: %s\r\n\r\n" % (self.case_self(), self.func(msg))
 
+    def handle_command(self, *args) -> bytes:
+        return self.func(*args)
 
-async def nonblocking_caser(s: Session):
+    async def handle_command_async(self, *args) -> Coroutine[Any, Any, bytes]:
+        result = await simple_http_get(*args)  # todo - fix typing
+
+        return b"after making the response, got:\r\n" + result.encode() + b"\r\n\r\n"
+
+
+def handle_http(url_bytes) -> bytes:
+    print(f"dummy: handling HTTP GET for url {url_bytes}")
+
+    return b"dummy handler of HTTP -> to be implemented\r\n\r\n"
+
+
+async def command_server(s: Session):
     cmd_quit = 'quit'
     cmd_upper = 'upper'
     cmd_title = 'title'
     cmd_lower = 'lower'
+    cmd_http = 'http'
     cmd_help = 'help'
 
     possible_modes = {
@@ -35,11 +51,13 @@ async def nonblocking_caser(s: Session):
         cmd_title: Command(cmd_title, bytes.title,),
         cmd_lower: Command(cmd_lower, bytes.lower,),
     }
+    commands = {
+        cmd_http: Command(cmd_help, handle_http, is_async=True),
+    }
 
     mode = cmd_upper
     # calling this function looks too low-level.
     # Let's make the handler receive a Session instead
-    # print(f"Received connection from {Reactor.get_instance().get_address_of(s)}")
     print(f"Received connection from {s.address}")
 
     try:
@@ -60,6 +78,7 @@ async def nonblocking_caser(s: Session):
                           b"upper - sets the echoing mode to UPPER case\r\n"
                           b"lower - sets the echoing mode to lower case\r\n"
                           b"title - sets the echoing mode to Title case\r\n"
+                          b"http <url> - make a HTTP GET request to <url> and print the response line & headers\n\r"
                           b"\r\n"
                           )
             elif line in possible_modes:
@@ -68,7 +87,21 @@ async def nonblocking_caser(s: Session):
                         s.write(possible_modes[line].switching_to_msg())
                         mode = mode_candidate
             elif line:
-                s.write(possible_modes[mode].echo_msg(line.encode('utf-8')))
+                line_parts = line.split()
+                if len(line_parts) > 1:
+                    # commands
+                    if line_parts[0] in commands:
+                        cmd = commands[line_parts[0]]
+                        if cmd.is_async:
+                            result = await cmd.handle_command_async(*line_parts[1:])
+                        else:
+                            result = cmd.handle_command(*line_parts[1:])
+
+                        s.write(result)
+                    else:
+                        s.write(possible_modes[mode].echo_msg(line.encode('utf-8')))
+                else:
+                    s.write(possible_modes[mode].echo_msg(line.encode('utf-8')))
 
             print(f"From {s.address} got {line}")
     finally:
@@ -79,6 +112,6 @@ if __name__ == '__main__':
     reactor = Reactor.get_instance()
 
     server_socket = create_async_server_socket('localhost', 1848, reuse=True)
-    reactor.add_server_socket_and_callback(server_socket, nonblocking_caser)
+    reactor.add_server_socket_and_callback(server_socket, command_server)
 
     reactor.start_reactor()
