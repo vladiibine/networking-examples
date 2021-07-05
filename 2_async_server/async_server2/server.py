@@ -13,8 +13,13 @@ class SessionFinished(Exception):
     pass
 
 
-# TODO - Does this make sense? Could we remove all traces of it?
 class IOIntention(enum.Enum):
+    """Important performance optimisation.
+
+    Without this, sockets that are ready to read will trigger their session's callbacks
+    even when they actually want to write next. This just leads to A LOT of triggered callbacks
+    and no progress (100% CPU usage)
+    """
     read = 'read'
     write = 'write'
     none = 'none'
