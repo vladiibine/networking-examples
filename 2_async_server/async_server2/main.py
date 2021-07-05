@@ -26,7 +26,8 @@ class Command:
     def handle_command(self, *args) -> bytes:
         return self.func(*args)
 
-    async def handle_command_async(self, *args) -> Coroutine[Any, Any, bytes]:
+    @staticmethod
+    async def handle_command_async(*args) -> Coroutine[Any, Any, bytes]:
         result = await simple_http_get(*args)  # todo - fix typing
 
         return b"after making the response, got:\r\n" + result.encode() + b"\r\n\r\n"
@@ -47,9 +48,9 @@ async def command_server(s: Session):
     cmd_help = 'help'
 
     possible_modes = {
-        cmd_upper: Command(cmd_upper, bytes.upper,),
-        cmd_title: Command(cmd_title, bytes.title,),
-        cmd_lower: Command(cmd_lower, bytes.lower,),
+        cmd_upper: Command(cmd_upper, bytes.upper, ),
+        cmd_title: Command(cmd_title, bytes.title, ),
+        cmd_lower: Command(cmd_lower, bytes.lower, ),
     }
     commands = {
         cmd_http: Command(cmd_help, handle_http, is_async=True),
@@ -72,15 +73,16 @@ async def command_server(s: Session):
                 return
 
             if line == cmd_help:
-                s.write(b"Available commands: \r\n"
-                          b"help - shows the available commands\r\n"
-                          b"quit - quits the session\r\n"
-                          b"upper - sets the echoing mode to UPPER case\r\n"
-                          b"lower - sets the echoing mode to lower case\r\n"
-                          b"title - sets the echoing mode to Title case\r\n"
-                          b"http <url> - make a HTTP GET request to <url> and print the response line & headers\n\r"
-                          b"\r\n"
-                          )
+                s.write(
+                    b"Available commands: \r\n"
+                    b"help - shows the available commands\r\n"
+                    b"quit - quits the session\r\n"
+                    b"upper - sets the echoing mode to UPPER case\r\n"
+                    b"lower - sets the echoing mode to lower case\r\n"
+                    b"title - sets the echoing mode to Title case\r\n"
+                    b"http <url> - make a HTTP GET request to <url> and print the response line & headers\n\r"
+                    b"\r\n"
+                )
             elif line in possible_modes:
                 for mode_candidate in possible_modes:
                     if mode is not mode_candidate and line == mode_candidate:
